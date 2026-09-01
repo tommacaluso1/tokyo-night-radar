@@ -3,8 +3,8 @@
    every list, phrase and sign is there. Map tiles you've already looked at come
    back too; ones you haven't simply won't draw. */
 
-const SHELL = "tnr-shell-v1";
-const TILES = "tnr-tiles-v1";
+const SHELL = "tnr-shell-v2";
+const TILES = "tnr-tiles-v2";
 const MAX_TILES = 400;
 
 const PRECACHE = [
@@ -67,7 +67,9 @@ self.addEventListener("fetch", e => {
       if (hit) return hit;
       try {
         const net = await fetch(req);
-        if (net.ok) { await c.put(req, net.clone()); trimTiles(); }
+        // Leaflet loads tiles as plain <img>, so these come back opaque with
+        // status 0 and ok === false. Cache those too or nothing is ever stored.
+        if (net.ok || net.type === "opaque") { await c.put(req, net.clone()); trimTiles(); }
         return net;
       } catch {
         return new Response("", { status: 504 });   // tile just doesn't draw
