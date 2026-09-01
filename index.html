@@ -253,8 +253,12 @@ footer b{color:var(--tx2)}
 <footer>
   Signs <b>light up when a place is likely open</b> on the live Tokyo clock — hours are typical for the
   venue type, not verified per venue.<br>
-  <b>◎ finds you, ➤ keeps the map centred on you as you walk.</b> Tap any pin for hours, the nearest
-  konbini and one-tap navigation. Works offline-ish once loaded; tiles need signal.
+  <b>◎ sharpens your fix</b> — it samples for 10 seconds and keeps the tightest reading, so hold still.
+  <b>➤ keeps the map centred on you</b> as you walk. Tap any pin for hours, the nearest konbini and
+  one-tap navigation.<br>
+  The ring around you is real accuracy, colour-coded: <b style="color:#B6F24B">green ±12–35 m</b> is a
+  satellite fix, <b style="color:#FFC24B">amber ±120 m</b> means it's guessing from wifi, <b style="color:#FF7A45">orange</b>
+  is worse. Indoors and between tall buildings you'll get amber — step outside and tap ◎ again.
 </footer>
 </div>
 
@@ -419,19 +423,42 @@ function setFollow(on){
   document.getElementById("follow").classList.toggle("on",on);
   if(on&&me) map.setView([me.lat,me.lng],Math.max(map.getZoom(),16));
 }
-function onPos(pos){
-  me={lat:pos.coords.latitude,lng:pos.coords.longitude}; acc=pos.coords.accuracy;
+/* Accuracy handling. Phones hand you a coarse wifi/cell fix within a second and a
+   real satellite fix ten to thirty seconds later, then sometimes fall back again.
+   Keep the good one, reject the junk, and say plainly how much to trust it. */
+let best=null;                                   // {lat,lng,acc,t}
+const GRADE=a=> a<=12?["satellite","#B6F24B"] : a<=35?["good","#B6F24B"]
+              : a<=120?["wifi-grade","#FFC24B"] : ["coarse","#FF7A45"];
+function paintQuality(){
+  if(!best) return;
+  const [label,col]=GRADE(best.acc), r=Math.round(best.acc);
   gpsEl.classList.remove("err");
-  gpsEl.innerHTML="gps <b>live</b> ±"+Math.round(acc)+"m";
-  bar.innerHTML="Tracking you · accuracy <b>±"+Math.round(acc)+" m</b> · ➤ to follow";
-  const ll=[me.lat,me.lng];
+  gpsEl.innerHTML="gps <b>±"+r+"m</b> "+label;
+  bar.innerHTML = best.acc>120
+    ? '<span class="warn">Rough fix (±'+r+' m — '+label+').</span> Step outside or away from tall buildings, then tap ◎.'
+    : "Tracking you · <b>±"+r+" m</b> · "+label+" · ➤ to follow";
+  if(meRing) meRing.setStyle({color:col,fillColor:col});
+}
+function onPos(pos){
+  const c=pos.coords, now=Date.now();
+  const cand={lat:c.latitude,lng:c.longitude,acc:c.accuracy||9999,t:now};
+  if(best){
+    // a much worse fix arriving right after a good one is the phone falling back to wifi
+    if(cand.acc>best.acc*2.5 && now-best.t<30000){ paintQuality(); return; }
+    // and ignore physically impossible jumps (>150 km/h) reported by a vague fix
+    const moved=dist(best.lat,best.lng,cand.lat,cand.lng)*1000;
+    const secs=Math.max((now-best.t)/1000,1);
+    if(moved/secs>42 && best.acc<60 && cand.acc>30){ paintQuality(); return; }
+  }
+  best=cand; me={lat:cand.lat,lng:cand.lng}; acc=cand.acc;
+  const ll=[me.lat,me.lng], col=GRADE(acc)[1];
   if(!meDot){
-    meRing=L.circle(ll,{radius:acc,color:"#B6F24B",weight:1,fillColor:"#B6F24B",fillOpacity:.1}).addTo(map);
+    meRing=L.circle(ll,{radius:acc,color:col,weight:1,fillColor:col,fillOpacity:.1}).addTo(map);
     meDot=L.circleMarker(ll,{radius:7,color:"#0E1400",weight:2,fillColor:"#B6F24B",fillOpacity:1}).addTo(map);
-    map.setView(ll,16);
+    map.setView(ll,acc<60?17:15);
   } else { meDot.setLatLng(ll); meRing.setLatLng(ll).setRadius(acc); }
-  if(follow) map.setView(ll,Math.max(map.getZoom(),16));
-  render();
+  if(follow) map.setView(ll,Math.max(map.getZoom(),17));
+  paintQuality(); render();
 }
 function onErr(e){
   gpsEl.classList.add("err");
@@ -440,13 +467,27 @@ function onErr(e){
   bar.innerHTML='<span class="warn">Location '+m+'.</span> Allow it in your browser settings, then tap ◎.';
   render();
 }
-if(navigator.geolocation){
-  navigator.geolocation.watchPosition(onPos,onErr,
-    {enableHighAccuracy:true,maximumAge:5000,timeout:20000});
-}else{ gpsEl.innerHTML="gps <b>unsupported</b>"; }
+const OPTS={enableHighAccuracy:true,maximumAge:0,timeout:25000};   // never reuse a cached fix
+if(navigator.geolocation){ navigator.geolocation.watchPosition(onPos,onErr,OPTS); }
+else{ gpsEl.innerHTML="gps <b>unsupported</b>"; }
+
+/* ◎ = sharpen: sample hard for 10s and keep only the tightest fix */
+let sharpening=false;
 document.getElementById("locate").onclick=()=>{
-  bar.textContent="Locating…";
-  navigator.geolocation.getCurrentPosition(onPos,onErr,{enableHighAccuracy:true,timeout:20000});
+  if(sharpening) return;
+  sharpening=true; best=null;
+  const btn=document.getElementById("locate"); btn.textContent="…";
+  bar.innerHTML="Sharpening the fix — hold still for 10 seconds…";
+  const stop=Date.now()+10000;
+  const tick=()=>{
+    navigator.geolocation.getCurrentPosition(p=>{
+      onPos(p);
+      if(Date.now()<stop) setTimeout(tick,1200);
+      else { sharpening=false; btn.textContent="◎";
+        if(best) map.setView([best.lat,best.lng],best.acc<40?18:16); }
+    },e=>{ onErr(e); sharpening=false; btn.textContent="◎"; }, OPTS);
+  };
+  tick();
 };
 document.getElementById("follow").onclick=()=>setFollow(!follow);
 
