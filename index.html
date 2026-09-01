@@ -7,6 +7,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Tokyo Radar">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-512.png">
+<link rel="icon" href="./icon-512.png">
 <title>Tokyo Night Radar</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -34,6 +37,9 @@ body{margin:0; color:var(--tx); background:var(--void);
 button,a,select,input{touch-action:manipulation}
 /* every control clears the 44px thumb minimum on a phone */
 .sortbtn{min-height:44px} .go a,.go button{min-height:46px}
+.offline{position:sticky; top:0; z-index:950; text-align:center; padding:7px 12px;
+  background:linear-gradient(180deg,#7A3410,#3A1806); color:#FFD9B0; border-bottom:1px solid #B4560F;
+  font-family:"Chakra Petch",system-ui,sans-serif; font-size:12px; letter-spacing:.06em}
 .wrap{position:relative; z-index:1; max-width:700px; margin:0 auto;
   padding:0 13px calc(104px + env(safe-area-inset-bottom))}   /* clears the bottom bar */
 @media (min-width:760px){ .wrap{padding:0 14px 80px} }
@@ -268,6 +274,7 @@ footer b{color:var(--tx2)}
 </style>
 </head>
 <body>
+<div class="offline" id="offline" hidden>Offline — everything still works except new map tiles</div>
 <div class="wrap">
 <header>
   <h1 class="title">TOKYO NIGHT RADAR<span class="kana">トウキョウ・ナイト・レーダー</span></h1>
@@ -642,7 +649,15 @@ document.getElementById("sort").onclick=e=>{
   sortBy=sortBy==="dist"?"day":"dist";
   e.target.textContent=sortBy==="dist"?"Nearest":"By day"; render();};
 
+/* offline: cache the app so a dead signal in a Tokyo backstreet doesn't cost you the guide */
+if("serviceWorker" in navigator){
+  addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
+}
+addEventListener("online", ()=>{ document.getElementById("offline").hidden=true; });
+addEventListener("offline",()=>{ document.getElementById("offline").hidden=false; });
+
 tickClock(); render(); renderDays(); renderGyms(); renderTalk(); renderTips();
+if(!navigator.onLine) document.getElementById("offline").hidden=false;
 setInterval(()=>{tickClock(); render();},60000);
 </script>
 </body>
